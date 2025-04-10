@@ -80,7 +80,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main() -> None:
     """Start the bot."""
     # Create the Application
-    application = Application.builder().token("8091392351:AAGliy09O6DxwR37Xcz7Ab8-i_09_pXoqaY").build()
+    application = Application.builder().token("7622416649:AAEbUMQxHCZ1AnuNEjLkQozTPc73NBVTbSs").build()
 
     # Add conversation handler for Instagram feature
     conv_handler = ConversationHandler(
