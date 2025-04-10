@@ -11,6 +11,9 @@ from telegram.ext import (
 import os
 import requests
 import logging
+import time
+import random
+from datetime import datetime, timedelta
 
 # Configure logging
 logging.basicConfig(
@@ -22,8 +25,37 @@ logger = logging.getLogger(__name__)
 # States for conversation handler
 ASK_USERNAME, = range(1)
 
-# Your Telegram Bot Token (replace with your actual token)
-BOT_TOKEN = "7622416649:AAGThevZBBmwDJPHIFrGdeUoqPJjJQvQ3nY"  # ⚠️ Remove before sharing code!
+class InstagramHelper:
+    def __init__(self):
+        self.L = instaloader.Instaloader()
+        self.L.context.sleep = True
+        self.L.context.max_connection_attempts = 2
+        self.last_request = datetime.now() - timedelta(minutes=5)
+        
+        # Try to load session if credentials exist
+        if os.getenv('IG_USERNAME') and os.getenv('IG_PASSWORD'):
+            try:
+                self.L.login(os.getenv('IG_USERNAME'), os.getenv('IG_PASSWORD'))
+                logger.info("Logged in to Instagram")
+            except Exception as e:
+                logger.warning(f"Instagram login failed: {e}")
+
+    def get_profile(self, username):
+        try:
+            # Rate limiting
+            now = datetime.now()
+            if (now - self.last_request).seconds < random.uniform(5, 15):
+                wait_time = random.uniform(5, 15) - (now - self.last_request).seconds
+                if wait_time > 0:
+                    time.sleep(wait_time)
+            
+            self.last_request = datetime.now()
+            return instaloader.Profile.from_username(self.L.context, username)
+        except Exception as e:
+            logger.error(f"Instagram error: {e}")
+            raise
+
+instagram = InstagramHelper()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Send welcome message"""
@@ -45,12 +77,9 @@ async def get_instagram_pic(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     username = update.message.text.strip().lower()
     
     try:
-        # Initialize Instaloader
-        L = instaloader.Instaloader()
-        L.context.sleep = True  # Be gentle with requests
-        
         await update.message.reply_text(f"🔍 Searching for @{username}...")
-        profile = instaloader.Profile.from_username(L.context, username)
+        
+        profile = instagram.get_profile(username)
         
         if profile.is_private:
             await update.message.reply_text(
@@ -61,14 +90,17 @@ async def get_instagram_pic(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             )
             return ConversationHandler.END
         
-        # Get and download profile picture
         pic_url = profile.profile_pic_url
         await update.message.reply_text("📥 Downloading profile picture...")
         
-        response = requests.get(pic_url, stream=True, timeout=10)
-        response.raise_for_status()  # Raise exception for bad status codes
+        # Add headers to mimic browser request
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
         
-        # Save temporarily and send
+        response = requests.get(pic_url, headers=headers, stream=True, timeout=15)
+        response.raise_for_status()
+        
         temp_file = f"temp_{username}.jpg"
         with open(temp_file, 'wb') as f:
             for chunk in response.iter_content(1024):
@@ -80,14 +112,13 @@ async def get_instagram_pic(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 caption=f"📸 Profile picture of @{username}"
             )
         
-        # Clean up
         os.remove(temp_file)
         
     except instaloader.exceptions.ProfileNotExistsException:
         await update.message.reply_text("❌ This username doesn't exist. Please check the spelling.")
     except requests.exceptions.RequestException as e:
         logger.error(f"Request failed: {e}")
-        await update.message.reply_text("⚠️ Couldn't download the image. Please try again later.")
+        await update.message.reply_text("⚠️ Instagram is limiting requests. Please try again in a few minutes.")
     except Exception as e:
         logger.error(f"Unexpected error: {e}")
         await update.message.reply_text("❌ An unexpected error occurred. Please try again later.")
@@ -107,13 +138,11 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
 
 def main() -> None:
     """Run the bot."""
-    # Create Application
+    BOT_TOKEN = "7622416649:AAGThevZBBmwDJPHIFrGdeUoqPJjJQvQ3nY"
     application = Application.builder().token(BOT_TOKEN).build()
     
-    # Add error handler first
     application.add_error_handler(error_handler)
     
-    # Add conversation handler
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('instagram', start_instagram)],
         states={
@@ -122,11 +151,9 @@ def main() -> None:
         fallbacks=[CommandHandler('cancel', cancel)],
     )
     
-    # Register handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(conv_handler)
     
-    # Run the bot
     logger.info("Starting bot...")
     application.run_polling()
 
