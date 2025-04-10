@@ -10,79 +10,110 @@ from telegram.ext import (
 )
 import os
 import requests
+import logging
+
+# Configure logging
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
 # States for conversation handler
 ASK_USERNAME, = range(1)
 
-async def start_instagram(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Start the Instagram profile picture conversation"""
+# Your Telegram Bot Token (replace with your actual token)
+BOT_TOKEN = "7622416649:AAEbUMQxHCZ1AnuNEjLkQozTPc73NBVTbSs"  # ⚠️ Remove before sharing code!
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Send welcome message"""
     await update.message.reply_text(
-        "Please send me an Instagram username (without @):"
+        "👋 Hi! I can fetch public Instagram profile pictures.\n\n"
+        "⚠️ Note: Private profiles cannot be accessed.\n\n"
+        "Send /instagram to get started!"
+    )
+
+async def start_instagram(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Start Instagram profile picture conversation"""
+    await update.message.reply_text(
+        "📸 Please send me a public Instagram username (without @):"
     )
     return ASK_USERNAME
 
 async def get_instagram_pic(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Fetch and send Instagram profile picture"""
-    username = update.message.text.strip()
+    username = update.message.text.strip().lower()
     
     try:
-        # Create instaloader instance
+        # Initialize Instaloader
         L = instaloader.Instaloader()
+        L.context.sleep = True  # Be gentle with requests
         
-        # Try to load the profile
         await update.message.reply_text(f"🔍 Searching for @{username}...")
         profile = instaloader.Profile.from_username(L.context, username)
         
-        if not profile.is_private:
-            # Get the profile picture URL
-            pic_url = profile.profile_pic_url
-            
-            # Download the image
-            await update.message.reply_text("📥 Downloading profile picture...")
-            response = requests.get(pic_url, stream=True)
-            
-            if response.status_code == 200:
-                # Save temporarily
-                temp_file = f"{username}_profile_pic.jpg"
-                with open(temp_file, 'wb') as f:
-                    f.write(response.content)
-                
-                # Send to user
-                with open(temp_file, 'rb') as photo:
-                    await update.message.reply_photo(
-                        photo=photo,
-                        caption=f"Profile picture of @{username}"
-                    )
-                
-                # Clean up
-                os.remove(temp_file)
-            else:
-                await update.message.reply_text("❌ Couldn't download the profile picture.")
-        else:
-            await update.message.reply_text("🔒 This profile is private. I can't access private profiles.")
-    
+        if profile.is_private:
+            await update.message.reply_text(
+                "🔒 This profile is private. I can't access private profiles.\n\n"
+                "If this is your account, you can:\n"
+                "1. Temporarily make it public\n"
+                "2. Upload the photo manually"
+            )
+            return ConversationHandler.END
+        
+        # Get and download profile picture
+        pic_url = profile.profile_pic_url
+        await update.message.reply_text("📥 Downloading profile picture...")
+        
+        response = requests.get(pic_url, stream=True, timeout=10)
+        response.raise_for_status()  # Raise exception for bad status codes
+        
+        # Save temporarily and send
+        temp_file = f"temp_{username}.jpg"
+        with open(temp_file, 'wb') as f:
+            for chunk in response.iter_content(1024):
+                f.write(chunk)
+        
+        with open(temp_file, 'rb') as photo:
+            await update.message.reply_photo(
+                photo=photo,
+                caption=f"📸 Profile picture of @{username}"
+            )
+        
+        # Clean up
+        os.remove(temp_file)
+        
     except instaloader.exceptions.ProfileNotExistsException:
-        await update.message.reply_text("❌ This Instagram username doesn't exist.")
+        await update.message.reply_text("❌ This username doesn't exist. Please check the spelling.")
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Request failed: {e}")
+        await update.message.reply_text("⚠️ Couldn't download the image. Please try again later.")
     except Exception as e:
-        await update.message.reply_text(f"❌ An error occurred: {str(e)}")
+        logger.error(f"Unexpected error: {e}")
+        await update.message.reply_text("❌ An unexpected error occurred. Please try again later.")
     
     return ConversationHandler.END
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Cancel the conversation"""
-    await update.message.reply_text('Okay, cancelled.')
+    """Cancel the current operation"""
+    await update.message.reply_text("🚫 Operation cancelled.")
     return ConversationHandler.END
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Send a message when the command /start is issued."""
-    await update.message.reply_text("Hi! Send /instagram to get started.")
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Log errors and send user notification"""
+    logger.error("Exception while handling an update:", exc_info=context.error)
+    if update and hasattr(update, 'message'):
+        await update.message.reply_text("❌ An error occurred. Please try again later.")
 
 def main() -> None:
-    """Start the bot."""
-    # Create the Application
-    application = Application.builder().token("7622416649:AAEbUMQxHCZ1AnuNEjLkQozTPc73NBVTbSs").build()
-
-    # Add conversation handler for Instagram feature
+    """Run the bot."""
+    # Create Application
+    application = Application.builder().token(BOT_TOKEN).build()
+    
+    # Add error handler first
+    application.add_error_handler(error_handler)
+    
+    # Add conversation handler
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('instagram', start_instagram)],
         states={
@@ -90,13 +121,13 @@ def main() -> None:
         },
         fallbacks=[CommandHandler('cancel', cancel)],
     )
-
-    # Add handlers
+    
+    # Register handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(conv_handler)
     
-    # Start the Bot
-    print("Bot is running...")
+    # Run the bot
+    logger.info("Starting bot...")
     application.run_polling()
 
 if __name__ == '__main__':
