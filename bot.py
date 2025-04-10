@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 ASK_USERNAME, = range(1)
 
 # Your Telegram Bot Token (replace with your actual token)
-BOT_TOKEN = "7622416649:AAEbUMQxHCZ1AnuNEjLkQozTPc73NBVTbSs"  # ⚠️ Remove before sharing code!
+BOT_TOKEN = "7622416649:AAGThevZBBmwDJPHIFrGdeUoqPJjJQvQ3nY"  # ⚠️ Remove before sharing code!
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Send welcome message"""
